@@ -39,6 +39,23 @@ def to_mathtext(label):
     return label
 
 
+def normalize_and_flip_violins(ax, n, axis_idx, flip_flags):
+    """split=Trueの半バイオリンは何もしないと向きが系列ごとに不規則に揃わないことがあるため、
+    既定では全て正方向（縦：右／横：上）に揃え、flip_flags[i]=Trueの系列だけ逆向きにする。"""
+    from matplotlib.collections import PolyCollection
+
+    pcs = [c for c in ax.collections if isinstance(c, PolyCollection)][:n]
+    for i, coll in enumerate(pcs):
+        center = i
+        want_positive = not flip_flags[i]
+        for path in coll.get_paths():
+            verts = path.vertices
+            offsets = verts[:, axis_idx] - center
+            natural_positive = offsets.mean() >= 0
+            if natural_positive != want_positive:
+                verts[:, axis_idx] = 2 * center - verts[:, axis_idx]
+
+
 @st.cache_resource
 def load_google_font(url, cache_path):
     try:
@@ -114,10 +131,37 @@ with st.sidebar:
     if df is not None:
         data_mode = st.radio(
             "データの形式",
-            ["ロング形式（グループ列1つ＋値1列）", "ワイド形式（基準値列＋比較列を複数選択→誤差を計算）"],
+            [
+                "列ごとに系列（列見出し＝系列名、値をそのままプロット）",
+                "グループ列＋値列（縦持ち/ロング形式）",
+                "誤差計算（基準値列－比較列）",
+            ],
         )
 
-        if data_mode.startswith("ロング"):
+        if data_mode.startswith("列ごと"):
+            st.caption("例：A列に「手法A」、B列に「手法B」…のように、1行目の見出しがそのまま系列名になり、その下の値をプロットします。")
+            default_cols = numeric_cols[: min(len(numeric_cols), 4)]
+            selected = st.multiselect("系列として扱う列（2つ以上）", numeric_cols, default=default_cols)
+            pair_rows = st.checkbox(
+                "行が対応している（同じ行＝同じサンプル）として扱う", value=True,
+                help="例：1行が1人の被験者で、各列がその人の手法ごとの測定値である場合はON。"
+                     "ONの場合は全列で同じ行（欠損なし）だけを使い、対応のある検定（Wilcoxon/Friedman）が使えます。",
+            )
+            if len(selected) >= 1:
+                if pair_rows:
+                    sub = df[selected].dropna()
+                    for col in selected:
+                        data_by_cat[col] = sub[col].values
+                else:
+                    for col in selected:
+                        vals = df[col].dropna().values
+                        if len(vals) > 0:
+                            data_by_cat[col] = vals
+            selected = [c for c in selected if c in data_by_cat]
+            val_label_default = "Value"
+            is_paired_mode = pair_rows
+
+        elif data_mode.startswith("グループ列"):
             cat_cols = [c for c in df.columns if c not in numeric_cols] or df.columns.tolist()
             group_col = st.selectbox(
                 "グループ列（系列を分ける列）", cat_cols,
@@ -160,16 +204,19 @@ if df is not None and len(selected) >= 2:
     with st.sidebar:
         st.header("2. 表示オプション")
         plot_title = st.text_input("タイトル", "Distribution Comparison")
-        y_label = st.text_input("Y軸ラベル", val_label_default)
+        y_label = st.text_input("値の軸ラベル（Vertical時はY軸／Horizontal時はX軸）", val_label_default)
         if font_choice != "Noto Sans JP（日本語タイトル等を使う場合）" and any(
             ord(ch) > 0x3000 for ch in (plot_title + y_label)
         ):
             st.caption("⚠️ 日本語を含む文字列が検出されました。グラフ内で文字化けする場合は「Noto Sans JP」を選択してください。")
-        use_mathtext = st.checkbox("X軸ラベルを下付き文字風にする（例: SSDE_RAI）", value=False)
-        show_zero_line = st.checkbox("y = 0 の破線を表示", value=is_paired_mode)
+        use_mathtext = st.checkbox("カテゴリ軸ラベルを下付き文字風にする（例: SSDE_RAI）", value=False)
+        show_zero_line = st.checkbox("0の破線を表示", value=is_paired_mode)
         show_pairwise = st.checkbox("ペアごとの比較表を表示（3系列以上の場合）", value=True)
 
         st.header("3. グラフ調整")
+        orientation = st.radio("グラフの向き", ["縦 (Vertical)", "横 (Horizontal)"], index=0, horizontal=True)
+        preview_width = st.slider("画面上のプレビュー表示幅 (px)", 300, 1200, 600, 50)
+        st.caption("※ ダウンロードされるPNGは下の画像サイズ・解像度設定どおりの高画質で出力されます。")
         fig_width = st.slider("画像横幅 (inch)", 6.0, 22.0, float(min(16, max(7, len(selected) * 2.3))), 0.5)
         fig_height = st.slider("画像縦幅 (inch)", 5.0, 12.0, 7.5, 0.5)
         violin_width = st.slider("バイオリン幅", 0.5, 1.2, 0.9, 0.05)
@@ -206,11 +253,15 @@ if df is not None and len(selected) >= 2:
                 )
                 label_val = st.text_input("ラベル", str(cat), key=f"label_{cat}")
                 color_val = st.color_picker("色", default_hex[idx], key=f"color_{cat}_{preset}")
-                series_config[cat] = {"order": order_val, "label": label_val, "color": color_val}
+                flip_val = st.checkbox("向きを反転", value=False, key=f"flip_{cat}")
+                series_config[cat] = {
+                    "order": order_val, "label": label_val, "color": color_val, "flip": flip_val,
+                }
 
     ordered_cats = sorted(selected, key=lambda c: (series_config[c]["order"], selected.index(c)))
     labels = [series_config[c]["label"] for c in ordered_cats]
     colors = [series_config[c]["color"] for c in ordered_cats]
+    flip_flags = [series_config[c]["flip"] for c in ordered_cats]
     data_list = [data_by_cat[c] for c in ordered_cats]
 
     if len(set(labels)) != len(labels):
@@ -318,73 +369,105 @@ if plot_df is not None:
     # --------------------------------------------------------
     # 描画
     # --------------------------------------------------------
+    orient_code = "h" if orientation.startswith("横") else "v"
     fig, ax = plt.subplots(figsize=(fig_width, fig_height), dpi=300)
 
+    if orient_code == "v":
+        xv, yv, axis_idx = "Group", "Value", 0
+    else:
+        xv, yv, axis_idx = "Value", "Group", 1
+
     sns.violinplot(
-        data=plot_df, x="Group", y="Value", hue="Group", order=labels, hue_order=labels,
+        data=plot_df, x=xv, y=yv, hue="Group", order=labels, hue_order=labels,
         split=True, inner=None, cut=0, density_norm="count",
         width=violin_width, palette=colors, linewidth=1.2,
-        ax=ax, legend=False,
+        ax=ax, legend=False, orient=orient_code,
     )
+
+    normalize_and_flip_violins(ax, N, axis_idx, flip_flags)
 
     use_group_colors = point_color_mode.startswith("系列")
     sns.stripplot(
-        data=plot_df, x="Group", y="Value", order=labels,
+        data=plot_df, x=xv, y=yv, order=labels,
         hue="Group" if use_group_colors else None,
         hue_order=labels if use_group_colors else None,
         palette=colors if use_group_colors else None,
         color=None if use_group_colors else "gray",
         size=point_size, jitter=jitter, alpha=point_alpha, ax=ax, legend=False,
-        edgecolor="white", linewidth=0.3,
+        edgecolor="white", linewidth=0.3, orient=orient_code,
     )
 
     sns.boxplot(
-        data=plot_df, x="Group", y="Value", order=labels, width=box_width,
+        data=plot_df, x=xv, y=yv, order=labels, width=box_width,
         showcaps=True,
         boxprops={"facecolor": "none", "zorder": 10, "linewidth": 1.5},
         medianprops={"color": "black", "zorder": 11, "linewidth": 1.5},
         whiskerprops={"linewidth": 1.5, "zorder": 10},
         capprops={"linewidth": 1.5, "zorder": 10},
-        showfliers=False, ax=ax,
+        showfliers=False, ax=ax, orient=orient_code,
     )
 
     ax.set_title(plot_title, fontsize=fs_title)
-    ax.set_ylabel(y_label, fontsize=fs_axis)
-    ax.set_xlabel("")
+    cat_labels = [to_mathtext(lab) for lab in labels] if use_mathtext else labels
 
-    ax.set_xticks(list(range(N)))
-    if use_mathtext:
-        ax.set_xticklabels([to_mathtext(lab) for lab in labels], fontsize=fs_tick)
+    if orient_code == "v":
+        ax.set_ylabel(y_label, fontsize=fs_axis)
+        ax.set_xlabel("")
+        ax.set_xticks(list(range(N)))
+        ax.set_xticklabels(cat_labels, fontsize=fs_tick)
+        ax.tick_params(axis="y", labelsize=fs_tick)
+        ax.tick_params(axis="x", length=0)
     else:
-        ax.set_xticklabels(labels, fontsize=fs_tick)
-
-    ax.tick_params(axis="y", labelsize=fs_tick)
-    ax.tick_params(axis="x", length=0)
+        ax.set_xlabel(y_label, fontsize=fs_axis)
+        ax.set_ylabel("")
+        ax.set_yticks(list(range(N)))
+        ax.set_yticklabels(cat_labels, fontsize=fs_tick)
+        ax.tick_params(axis="x", labelsize=fs_tick)
+        ax.tick_params(axis="y", length=0)
 
     if show_zero_line:
-        ax.axhline(0, color="black", linestyle="--", linewidth=1.2)
+        if orient_code == "v":
+            ax.axhline(0, color="black", linestyle="--", linewidth=1.2)
+        else:
+            ax.axvline(0, color="black", linestyle="--", linewidth=1.2)
 
-    y_max = plot_df["Value"].max()
-    y_min = plot_df["Value"].min()
-    data_range = y_max - y_min if y_max > y_min else 1.0
+    v_max = plot_df["Value"].max()
+    v_min = plot_df["Value"].min()
+    data_range = v_max - v_min if v_max > v_min else 1.0
     top_padding = data_range * 0.25
-    ax.set_ylim(y_min - data_range * 0.1, y_max + top_padding)
-
-    y = y_max + top_padding * 0.2
+    pad_pos = v_max + top_padding * 0.2
     h = data_range * 0.03
-    if N == 2 and bracket_pair is not None:
-        x1, x2 = bracket_pair
-        ax.plot([x1, x1, x2, x2], [y, y + h, y + h, y], lw=1.5, color="black")
-        ax.text((x1 + x2) / 2, y + h, sig_text, ha="center", va="bottom", fontsize=fs_sig)
-    elif sig_text is not None:
-        ax.text((N - 1) / 2, y, sig_text, ha="center", va="bottom", fontsize=fs_sig)
+
+    if orient_code == "v":
+        ax.set_ylim(v_min - data_range * 0.1, v_max + top_padding)
+        if N == 2 and bracket_pair is not None:
+            x1, x2 = bracket_pair
+            ax.plot([x1, x1, x2, x2], [pad_pos, pad_pos + h, pad_pos + h, pad_pos], lw=1.5, color="black")
+            ax.text((x1 + x2) / 2, pad_pos + h, sig_text, ha="center", va="bottom", fontsize=fs_sig)
+        elif sig_text is not None:
+            ax.text((N - 1) / 2, pad_pos, sig_text, ha="center", va="bottom", fontsize=fs_sig)
+    else:
+        ax.set_xlim(v_min - data_range * 0.1, v_max + top_padding)
+        if N == 2 and bracket_pair is not None:
+            y1, y2 = bracket_pair
+            ax.plot([pad_pos, pad_pos + h, pad_pos + h, pad_pos], [y1, y1, y2, y2], lw=1.5, color="black")
+            ax.text(pad_pos + h, (y1 + y2) / 2, sig_text, ha="left", va="center", fontsize=fs_sig)
+        elif sig_text is not None:
+            ax.text(pad_pos, (N - 1) / 2, sig_text, ha="left", va="center", fontsize=fs_sig)
 
     sns.despine(ax=ax)
-    st.pyplot(fig)
+
+    try:
+        st.pyplot(fig, width=preview_width)
+    except TypeError:
+        st.pyplot(fig)
 
     if pairwise_df is not None:
         st.markdown("**ペアごとの比較（Bonferroni補正済み）**")
-        st.dataframe(pairwise_df, use_container_width=True)
+        try:
+            st.dataframe(pairwise_df, width="stretch")
+        except TypeError:
+            st.dataframe(pairwise_df, use_container_width=True)
 
     # --------------------------------------------------------
     # ダウンロード
