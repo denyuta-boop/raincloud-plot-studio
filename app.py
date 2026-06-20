@@ -53,37 +53,28 @@ if df is not None:
         # 描画開始
         fig, ax = plt.subplots(figsize=(7, 6))
         
-        # 1. 左側(g1)のハーフバイオリン
-        v1 = ax.violinplot(d1, positions=[0], vert=True, widths=0.8, showextrema=False)
-        for pc in v1['bodies']:
-            pc.set_facecolor(color1)
-            pc.set_alpha(0.7)
-            # 頂点を取得し、x座標を負の方向（左）へ反転
-            verts = pc.get_paths()[0].vertices
-            verts[:, 0] = -np.abs(verts[:, 0]) 
-            
-        # 2. 右側(g2)のハーフバイオリン
-        v2 = ax.violinplot(d2, positions=[0], vert=True, widths=0.8, showextrema=False)
-        for pc in v2['bodies']:
-            pc.set_facecolor(color2)
-            pc.set_alpha(0.7)
-            # 頂点を取得し、x座標を正の方向（右）へ固定
-            verts = pc.get_paths()[0].vertices
-            verts[:, 0] = np.abs(verts[:, 0])
+        # --- 1. ハーフバイオリン描画（Seabornの機能を活用） ---
+        # sideを指定することで確実にハーフにします
+        sns.violinplot(data=df, x=[0]*len(d1), y=d1, color=color1, ax=ax, 
+                       inner=None, cut=0, side='left', width=1.0, alpha=0.6)
+        sns.violinplot(data=df, x=[0]*len(d2), y=d2, color=color2, ax=ax, 
+                       inner=None, cut=0, side='right', width=1.0, alpha=0.6)
 
-        # 3. 散布図 (内側に配置)
-        ax.scatter(np.random.normal(0, 0.03, size=len(d1)) - 0.2, d1, color=color1, alpha=0.4, s=20)
-        ax.scatter(np.random.normal(0, 0.03, size=len(d2)) + 0.2, d2, color=color2, alpha=0.4, s=20)
+        # --- 2. 散布図とボックスプロット ---
+        # ストリッププロット（各サイドに配置）
+        ax.scatter(np.random.normal(0, 0.05, size=len(d1)) - 0.2, d1, color=color1, alpha=0.4, s=20)
+        ax.scatter(np.random.normal(0, 0.05, size=len(d2)) + 0.2, d2, color=color2, alpha=0.4, s=20)
         
-        # 4. ボックスプロット (左右にオフセット)
+        # ボックスプロット（左右にオフセット）
         ax.boxplot([d1, d2], positions=[-0.2, 0.2], widths=0.15, showfliers=False, 
                    patch_artist=True, boxprops={'facecolor':'none', 'edgecolor':'black'})
 
-        # 装飾
+        # --- 装飾 ---
         ax.axvline(0, color="gray", linestyle="--", alpha=0.5)
         ax.set_xticks([0])
         ax.set_xticklabels([f"{g1} vs {g2}\n(p={p_val:.4f})"], fontsize=12, fontweight='bold')
-        ax.set_xlim(-0.6, 0.6) # 中心でカット
+        ax.set_xlim(-0.8, 0.8)
+        ax.set_title(plot_title, fontsize=14)
         
         st.pyplot(fig)
         
