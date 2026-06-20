@@ -182,7 +182,7 @@ with st.sidebar:
             is_paired_mode = False
 
         else:
-            st.caption("例：meanSSDE（基準値）, SSDE_RAI, SSDE_center… のような列構成のCSV")
+            st.caption("例：「正解・基準となる列」と、それと比較したい「複数の測定値・予測値などの列」を持つCSV（例：実測値, 予測A, 予測B）")
             ref_col = st.selectbox("基準値列", numeric_cols)
             method_candidates = [c for c in numeric_cols if c != ref_col]
             default_methods = method_candidates[: min(2, len(method_candidates))]
@@ -209,7 +209,9 @@ if df is not None and len(selected) >= 2:
             ord(ch) > 0x3000 for ch in (plot_title + y_label)
         ):
             st.caption("⚠️ 日本語を含む文字列が検出されました。グラフ内で文字化けする場合は「Noto Sans JP」を選択してください。")
-        use_mathtext = st.checkbox("カテゴリ軸ラベルを下付き文字風にする（例: SSDE_RAI）", value=False)
+        use_mathtext = st.checkbox(
+            "ラベルのアンダーバー（_）以降を下付き文字にする（例: Sample_1 → Sample₁ 風）", value=False
+        )
         show_zero_line = st.checkbox("0の破線を表示", value=is_paired_mode)
         show_pairwise = st.checkbox("ペアごとの比較表を表示（3系列以上の場合）", value=True)
 
