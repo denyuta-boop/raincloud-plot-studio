@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns  # ✅ これを追加しました
 from scipy.stats import mannwhitneyu
 import io
 
@@ -17,7 +18,7 @@ with st.sidebar:
     use_demo = st.checkbox("サンプルデータを使う (Tips Dataset)")
     
     if use_demo:
-        df = sns.load_dataset("tips")
+        df = sns.load_dataset("tips") # ここでsnsを使用します
         group_col = "time"
         val_col = "total_bill"
         st.success("サンプルデータ(Tips)をロードしました")
@@ -57,7 +58,6 @@ if df is not None:
         for pc in v1['bodies']:
             pc.set_facecolor(color1)
             pc.set_alpha(0.7)
-            # 頂点を左側に反転
             m = np.mean(pc.get_paths()[0].vertices[:, 0])
             pc.get_paths()[0].vertices[:, 0] = 2 * m - pc.get_paths()[0].vertices[:, 0]
         
@@ -68,7 +68,6 @@ if df is not None:
             pc.set_alpha(0.7)
 
         # 3. 散布図とボックスプロット (左右にオフセット配置)
-        # 左グループ(d1)を左へ、右グループ(d2)を右へ
         ax.scatter(np.random.normal(0, 0.03, size=len(d1)) - 0.2, d1, color=color1, alpha=0.4, s=20)
         ax.scatter(np.random.normal(0, 0.03, size=len(d2)) + 0.2, d2, color=color2, alpha=0.4, s=20)
         
