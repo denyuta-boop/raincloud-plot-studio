@@ -195,6 +195,17 @@ with st.sidebar:
             is_paired_mode = True
 
 # ============================================================
+# メインエリア：データプレビュー（一番上に表示）
+# ============================================================
+if df is not None:
+    st.subheader("👀 データプレビュー（先頭10行）")
+    try:
+        st.dataframe(df.head(10), width="stretch")
+    except TypeError:
+        st.dataframe(df.head(10), use_container_width=True)
+    st.caption(f"{len(df):,} 行 × {len(df.columns)} 列")
+
+# ============================================================
 # サイドバー：表示・グラフオプション（系列が2つ以上揃ってから表示）
 # ============================================================
 plot_df = None
